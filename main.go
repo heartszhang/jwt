@@ -3,6 +3,7 @@ package main
 
 import (
 	"bytes"
+	"compress/flate"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rsa"
@@ -53,6 +54,7 @@ func load_pkcs8_pem(fn string) (*rsa.PrivateKey, error) {
 		return nil, invalid_format
 	}
 	k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+
 	return k.(*rsa.PrivateKey), err
 }
 func parse_jwtheader(x []byte) (header JwtHeader, err error) {
@@ -66,17 +68,24 @@ func parse_userid(x string) (uid string, err error) {
 	}
 	return fields[1], nil
 }
-func base64decode_fields(x string) ([][]byte, error) {
+func base64_decode_padding(x string) ([]byte, error) {
+	for i := len(x) % 4; i > 0 && i < 4; i++ {
+		x += "="
+	}
+	return base64.URLEncoding.DecodeString(x)
+}
+
+//jwtheader, cek, iv, text, tag
+func base64decode_fields(x string) (v [][]byte, err error) {
 	fields := strings.Split(x, ".")
 	if len(fields) != 5 {
 		return nil, invalid_format
 	}
-	v := make([][]byte, len(fields))
-	for i, f := range fields {
-		if data, err := base64.StdEncoding.DecodeString(f); err != nil {
+	for _, f := range fields {
+		if data, err := base64_decode_padding(f); err != nil {
 			return nil, err
 		} else {
-			v[i] = data
+			v = append(v, data)
 		}
 	}
 	return v, nil
@@ -90,6 +99,7 @@ func parse_jwe_joe(x string) (joe *JsonObjectEncrypted, err error) {
 	if joe.UserId, err = parse_userid(fields[0]); err != nil {
 		return
 	}
+
 	var bfields [][]byte
 	if bfields, err = base64decode_fields(fields[1]); err != nil {
 		return
@@ -100,6 +110,7 @@ func parse_jwe_joe(x string) (joe *JsonObjectEncrypted, err error) {
 	joe.Key, joe.Iv, joe.Text, joe.Tag = bfields[1], bfields[2], bfields[3], bfields[4]
 	return
 }
+
 func print_joe(auth *JsonObjectEncrypted) {
 	log.Println("user:", auth.UserId)
 	log.Println("jwt-header:", auth.Header)
@@ -120,7 +131,8 @@ func concat_kdf(cek []byte) []byte {
 	binary.Write(buf, binary.BigEndian, []byte("Encryption"))
 
 	h := sha256.New()
-	io.Copy(h, buf)
+	h.Write(buf.Bytes())
+	//io.Copy(h, buf)
 
 	return h.Sum(nil)[:128/8]
 }
@@ -141,6 +153,13 @@ func a128_cbc_hs256(bin []byte, key []byte, iv []byte) ([]byte, error) {
 	bm.CryptBlocks(bin, bin)
 	return bin, nil
 }
+func inflate(in []byte) (v []byte, err error) {
+	out := &bytes.Buffer{}
+	reader := flate.NewReader(bytes.NewBuffer(in))
+	_, err = io.Copy(out, reader)
+	reader.Close()
+	return out.Bytes(), err
+}
 
 const pk = `K:\ws\AAA_1.3.0_XBOX_build20150126\resource\xsts.auth.bestv.com.pkcs8_der.key.pem`
 
@@ -154,8 +173,19 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	cek, err := rsa_oaep_unwrap(enced.Key, private_key)
+	if err != nil {
+		panic(err)
+	}
+	log.Println("cek-len:", len(cek), len(enced.Key))
 	aeskey := concat_kdf(cek)                                  // non-standard
 	plain, err := a128_cbc_hs256(enced.Text, aeskey, enced.Iv) //a128-cbc+hs256
-	log.Println(err, plain)
+	if err != nil {
+		panic(err)
+	}
+	if enced.Header.Zip == "DEF" {
+		plain, err = inflate(plain)
+		log.Println(err, string(plain))
+	}
 }

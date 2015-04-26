@@ -139,8 +139,7 @@ func concat_kdf(cek []byte) []byte {
 
 //why use sha1
 func rsa_oaep_unwrap(cek []byte, key *rsa.PrivateKey) ([]byte, error) {
-	v, err := rsa.DecryptOAEP(sha1.New(), nil, key, cek, []byte{})
-	return v, err
+	return rsa.DecryptOAEP(sha1.New(), nil, key, cek, []byte{})
 }
 
 //AES/CBC/PKCS5Padding

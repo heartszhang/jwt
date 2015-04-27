@@ -14,8 +14,9 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io/ioutil"
-	"log"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -130,8 +131,8 @@ func parse_jwe_joe(x string) (joe *JsonObjectEncrypted, err error) {
 
 //print jose's field, different from ToString
 func print_joe(auth *JsonObjectEncrypted) {
-	log.Println("user:", auth.UserId)
-	log.Println("jwt-header:", auth.Header)
+	//	log.Println("user:", auth.UserId)
+	//	log.Println("jwt-header:", auth.Header)
 }
 
 //ignore mac key
@@ -151,7 +152,6 @@ func concat_kdf(cek []byte) []byte {
 
 	h := sha256.New()
 	h.Write(buf.Bytes())
-	//io.Copy(h, buf)
 
 	return h.Sum(nil)[:128/8]
 }
@@ -197,7 +197,6 @@ func deflate(in []byte) []byte {
 	buf := &bytes.Buffer{}
 	writer, _ := flate.NewWriter(buf, -1)
 	writer.Write(in)
-	//	writer.Flush()
 	writer.Close()
 	return buf.Bytes()
 }
@@ -228,45 +227,38 @@ func pkcs5_unpadding(src []byte) []byte {
 //openssl pkcs8 -inform DER -in xsts.auth.bestv.com.pkcs8_der.key  -outform PEM -out xsts.auth.bestv.com.pkcs8_der.key.pem
 const pk = `xsts.auth.bestv.com.pkcs8_der.key.pem`
 
-func create_xsts_token(uid string) (string, error) {
-
-}
-func main() {
+func create_xsts_token(uid string) (xsts_token string, err error) {
 	private_key, err := load_pkcs8_pem(pk)
 	if err != nil {
-		panic(err)
+		return
 	}
 	joe, err := parse_jwe_joe(authorization)
 	if err != nil {
-		panic(err)
+		return
 	}
 	print_joe(joe)
 
 	cek, err := rsa_oaep_unwrap(joe.Key, private_key)
 	if err != nil {
-		panic(err)
+		return
 	}
-	log.Println("cek:", cek, len(joe.Key))
 	aeskey := concat_kdf(cek)                                      // non-standard
 	plain, err := a128_cbc_hs256_decrypt(joe.Text, aeskey, joe.Iv) //a128-cbc+hs256
 	if err != nil {
-		panic(err)
+		return
 	}
 	if joe.Header.Zip == "DEF" {
 		plain, err = inflate(plain)
-		log.Println(err, string(plain))
 	}
 	if err != nil {
-		panic(err)
+		return
 	}
 	fields := strings.Split(string(plain), ".")
 	if len(fields) < 3 {
-		panic(invalid_format)
+		err = invalid_format
 	}
 	token, _ := base64_decode_padding(fields[1])
 	header, sig := fields[0], fields[2]
-	//	log.Println(string(header))
-	log.Println(string(token))
 
 	//xsts_token
 	plain = patch_xsts_token(header, string(token), sig) //header.token.signature
@@ -276,8 +268,37 @@ func main() {
 
 	joe.Text, err = a128_cbc_hs256_encrypy(plain, aeskey, joe.Iv)
 	if err != nil {
-		panic(err)
+		return
 	}
-	joe.UserId = user_id
-	log.Println(joe.ToString())
+	joe.UserId = uid
+	xsts_token = joe.ToString()
+	return
+}
+func main_test() {
+	xt, err := create_xsts_token("023513000031081") //hearts.zhang@outlook.com
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println(xt)
+}
+func http_xsts(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	var uid string
+	if uid = r.FormValue("uid"); uid == "" {
+		uid = "023513000031081"
+	}
+	w.Header().Set("Content-Type", "text/plain")
+
+	if xt, err := create_xsts_token(uid); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(err.Error()))
+	} else {
+		//		w.Header().Set("Content-Length", strconv.Itoa(len(xt)))
+		w.Write([]byte(xt))
+	}
+
+}
+func main() {
+	http.HandleFunc("/xsts", http_xsts)
+	http.ListenAndServe(":5000", nil)
 }

@@ -6,5 +6,4 @@ const authorization = `XBL3.0 x=5381178999727281455;eyJlbmMiOiJBMTI4Q0JDK0hTMjU2
 
 var (
 	invalid_format = errors.New("generic error when patch bestv jwt for xboxlive")
-	user_id        = "023513000031081" // hearts.zhang@outlook.com
 )

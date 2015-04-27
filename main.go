@@ -14,18 +14,15 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
 
-const authorization = `XBL3.0 x=5381178999727281455;eyJlbmMiOiJBMTI4Q0JDK0hTMjU2IiwiYWxnIjoiUlNBLU9BRVAiLCJjdHkiOiJKV1QiLCJ6aXAiOiJERUYiLCJ4NXQiOiI4VmUyZ0x6NEZUYXZEN0xwV2psdXg2TTVZd2sifQ.hYOvo3BJqGXOFLIXaQkNwssLkSYdv8TjDKcEmrBjGhFku7TmGg3BekhUGNwDiReDwhGPvfYxikcLd38lj0kHxYq7_BU_yL0z5vTv5VckD0L7QORCftFA3JERobe7z7HoLzSM7LyyTR6yGAlMs-vHBF4drsjX-oWrkwo22nposlA1zkPC2NjTvNaQrmkz0qdWjKVl2jK2y-gxQXTAY5KGqQ0jWcg0Ne0_YvyyepY2SYCXTtctnNdeguXOJ3VJ0A5NWJrpPofH4AgFh5T2iLAeJR1Elf-prMLBFfBw5tv0rbEcY2HDrekRYWZ2WSQrRIAT3i_MqggPjwa3kB6vIcqHag.kM3aobqF1XjFLFvRh4FXOg.BGqHU0mtnLf_EMRUAvEiLwpdCP6ItVV4BOza-6i3pJDsLadd8XK09Wb_5vYregxdwWuIREOt55vZI655PWWandXKt193ZVSCKYg9TdkOJomoBkXCFI1PJHTg6_crtLyT6ZmOyv4sY2XbqdK1IpLkfzBr5lWO_S6bVV-FvzN3jNrIXLbVW1afF9sPrjYLQ1nUAqV804IJVIMYEdvRLnbVmq3gtrt2yIuPAB7i3xXtQItJ3MwbfEqKRLf382GaMJ8tJGdP76A_wMyZwjMs1kjGK4N1HJt0BoXEiB-bXFJLPEWXZEAm6S4euwggdQ2PVQpT0v3cTJcbQUfpJtnH7cB1fivYQrunZLxPIi6S2AoaY5XW0nYBPeMy5T1jC1luOowDsYQjsAdKgL4eflu8pNpsMX6U1TAygEJpxn_6ZLIFP2iiCRUVjVws8EAM5WiHLx94aXjFYpLwBHeIUYGoTzPUqdKrU__FHcioobgmDU9g1yHHwtVCseKNM1bHlPa6u1-kc0GiftcF7LmpnHtL-XWKvuGjIuoP52E9AC7ARk4tTT3CSafYHEiDti4zaO1x9AAZpHuRsSDJJyuiAhPaEJVOJuuPJIaP-zr8gfy_kYyf0ENehwayRLSIXZZdNzRbD5aic2iB3lHX1vnao7vUTuNGplIqugUOdc6ymxlbxsTpwttWeJM3yBL569-OGvL4-ZKIMmlDJGXNW5p6fGRVUePZi3V3fHa826UQ2ZJFLaRSRpdWsqYpsvb0HdBzDccNHphl89Q2KHAKhlkWKOYSljwFRAbKHM_O6f0jRhIY2rv3qlJa5uWKKFB-jg3JdVfmMHUdWxNF5o2vbZlJcQ-ym0VXWnnphuZ74IRq9dQ4W_G3IdxkX8I-chgoNfbYyYWsDd_Kd9GdlkPBOu00TkREQgDOqq59nuaDycIHwv7PoBlsmhcWH7vDaOW5Tl2vmFXA3A8YLlhmIhBc3fhWQ_l7KjntNGw4XribhEz_0myunb5C730vJpKrXPFlD8Q-H7H_RKRco-ZE-dXgblQZgbvbD8u1nKOHRV5PdtDiFTuil04w67h_5M1u7nRoJqtUCxNvXEyfNbZOQ0O51_Y3JZH8vq98womp78ahFwORS0m0hI8XtJgoa7j5cdCrobtZGNIs-8jeILztbbVZgFhGp-TYyLd_7Yy69MTyHFOgBaRvmFKMrHDfPKIAZ0ZU9fMjh5FDAIsY5jZToefGPiEDclNZpRwu8S-AMqqqli3-yPKzexCUJ0iTEJcnU_SJqMURWuJHlR3q.pKRsk9pEpMXAkNoUXmfzVjXRB6DKw4PROgw_WkyyiUg`
-
-type JwtHeader struct {
+type JoseHeader struct {
 	Zip        string `json:"zip"` //NONE or DEF
 	Thumbprint string `json:"x5t"` //x509 token
 	Enc        string `json:"enc"` //A128CBC+HS256, not A128CBC-HS256
@@ -35,14 +32,14 @@ type JwtHeader struct {
 
 type JsonObjectEncrypted struct {
 	UserId string
-	Header JwtHeader
+	Header JoseHeader
 	Key    []byte // encrypted and plain
 	Iv     []byte
 	Text   []byte
 	Tag    []byte
 }
 
-func to_string(joe *JsonObjectEncrypted) string {
+func (joe JsonObjectEncrypted) ToString() string {
 	header, _ := json.Marshal(joe.Header)
 	f0 := base64.URLEncoding.EncodeToString(header)
 	f1 := base64.URLEncoding.EncodeToString(joe.Key)
@@ -50,13 +47,10 @@ func to_string(joe *JsonObjectEncrypted) string {
 	f3 := base64.URLEncoding.EncodeToString(joe.Text)
 	f4 := base64.URLEncoding.EncodeToString(joe.Tag)
 
-	return fmt.Sprintf("XBL3.0 x=%v;%v.%v.%v.%v.%v", joe.UserId, f0, f1, f2, f3, f4)
+	return "XBL3.0 x=" + joe.UserId + ";" + f0 + "." + f1 + "." + f2 + "." + f3 + "." + f4
 }
 
-var (
-	invalid_format = errors.New("invalid format")
-)
-
+//rsa private key, pkc8.pem
 func load_pkcs8_pem(fn string) (*rsa.PrivateKey, error) {
 	d, err := ioutil.ReadFile(fn)
 	if err != nil {
@@ -70,10 +64,15 @@ func load_pkcs8_pem(fn string) (*rsa.PrivateKey, error) {
 
 	return k.(*rsa.PrivateKey), err
 }
-func parse_jwtheader(x []byte) (header JwtHeader, err error) {
+
+//http://self-issued.info/docs/draft-ietf-oauth-json-web-token.html
+func parse_jwtheader(x []byte) (header JoseHeader, err error) {
 	err = json.Unmarshal(x, &header)
 	return
 }
+
+//xbox userid, 023513000031081 can be used as default
+//XBL3.0 x=023513000031081
 func parse_userid(x string) (uid string, err error) {
 	fields := strings.Split(x, "=")
 	if len(fields) != 2 {
@@ -81,6 +80,8 @@ func parse_userid(x string) (uid string, err error) {
 	}
 	return fields[1], nil
 }
+
+//RawURLEncoding was remove from golang's base64 package. I don't know the reason
 func base64_decode_padding(x string) ([]byte, error) {
 	for i := len(x) % 4; i > 0 && i < 4; i++ {
 		x += "="
@@ -88,8 +89,9 @@ func base64_decode_padding(x string) ([]byte, error) {
 	return base64.URLEncoding.DecodeString(x)
 }
 
-//jwtheader, cek, iv, text, tag
-func base64decode_fields(x string) (v [][]byte, err error) {
+//jwtheader . cek . iv . text . tag
+//compact jose
+func base64decode_parts(x string) (v [][]byte, err error) {
 	fields := strings.Split(x, ".")
 	if len(fields) != 5 {
 		return nil, invalid_format
@@ -103,6 +105,8 @@ func base64decode_fields(x string) (v [][]byte, err error) {
 	}
 	return v, nil
 }
+
+//http-header authorization XBL3.0..., se const 'authorization'
 func parse_jwe_joe(x string) (joe *JsonObjectEncrypted, err error) {
 	fields := strings.Split(x, ";")
 	if len(fields) != 2 {
@@ -113,17 +117,18 @@ func parse_jwe_joe(x string) (joe *JsonObjectEncrypted, err error) {
 		return
 	}
 
-	var bfields [][]byte
-	if bfields, err = base64decode_fields(fields[1]); err != nil {
+	var parts [][]byte
+	if parts, err = base64decode_parts(fields[1]); err != nil {
 		return
 	}
-	if joe.Header, err = parse_jwtheader(bfields[0]); err != nil {
+	if joe.Header, err = parse_jwtheader(parts[0]); err != nil {
 		return
 	}
-	joe.Key, joe.Iv, joe.Text, joe.Tag = bfields[1], bfields[2], bfields[3], bfields[4]
+	joe.Key, joe.Iv, joe.Text, joe.Tag = parts[1], parts[2], parts[3], parts[4]
 	return
 }
 
+//print jose's field, different from ToString
 func print_joe(auth *JsonObjectEncrypted) {
 	log.Println("user:", auth.UserId)
 	log.Println("jwt-header:", auth.Header)
@@ -132,6 +137,7 @@ func print_joe(auth *JsonObjectEncrypted) {
 //ignore mac key
 //key-type = "A128CBC+HS256"
 //key-size = 128
+//I dont' know why bestv just use concat and sha256 only. it's very different from hmac+sha256
 func concat_kdf(cek []byte) []byte {
 	buf := &bytes.Buffer{}
 
@@ -150,21 +156,25 @@ func concat_kdf(cek []byte) []byte {
 	return h.Sum(nil)[:128/8]
 }
 
-//why use sha1
+//I don't know why to use sha1, but it does work.
 func rsa_oaep_unwrap(cek []byte, key *rsa.PrivateKey) ([]byte, error) {
 	return rsa.DecryptOAEP(sha1.New(), nil, key, cek, []byte{})
 }
 
 //AES/CBC/PKCS5Padding
-func a128_cbc_hs256(bin []byte, key []byte, iv []byte) ([]byte, error) {
+//pkcs5_unpadding is unnecessary
+func a128_cbc_hs256_decrypt(bin []byte, key []byte, iv []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
-	bm := cipher.NewCBCDecrypter(block, iv)
-	bm.CryptBlocks(bin, bin)
-	return pkcs5_unpadding(bin), nil
+	aes := cipher.NewCBCDecrypter(block, iv)
+	aes.CryptBlocks(bin, bin)
+	//return pkcs5_unpadding(bin), nil
+	return bin, nil
 }
+
+//pkcs5_padding is necessary
 func a128_cbc_hs256_encrypy(bin []byte, key []byte, iv []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -175,29 +185,33 @@ func a128_cbc_hs256_encrypy(bin []byte, key []byte, iv []byte) ([]byte, error) {
 	aes.CryptBlocks(bin, bin)
 	return bin, err
 }
+
 func inflate(in []byte) (v []byte, err error) {
 	reader := flate.NewReader(bytes.NewReader(in))
 	v, err = ioutil.ReadAll(reader)
 	reader.Close()
 	return
 }
+
 func deflate(in []byte) []byte {
 	buf := &bytes.Buffer{}
 	writer, _ := flate.NewWriter(buf, -1)
 	writer.Write(in)
-	writer.Flush()
+	//	writer.Flush()
 	writer.Close()
 	return buf.Bytes()
 }
 
+//make expire a week later, leave any other fields unchanged
 //base64, plain, base64
 func patch_xsts_token(header, token, sig string) []byte {
-	expire := uint32(time.Now().Add(time.Hour * 7 * 24).Unix())
+	expire := time.Now().Add(time.Hour * 7 * 24).Unix()
 	re := regexp.MustCompile(`"exp":\d+`)
-	token = re.ReplaceAllString(token, fmt.Sprint(`"exp":`, expire))
+	token = re.ReplaceAllString(token, `"exp":`+strconv.FormatInt(expire, 10)) //fmt.Sprint(`"exp":`, expire)
 	token = base64.URLEncoding.EncodeToString([]byte(token))
 	return []byte(header + "." + string(token) + sig)
 }
+
 func pkcs5_padding(src []byte, blockSize int) []byte {
 	padding := blockSize - len(src)%blockSize
 	padtext := bytes.Repeat([]byte{byte(padding)}, padding)
@@ -210,30 +224,35 @@ func pkcs5_unpadding(src []byte) []byte {
 	return src[:(length - unpadding)]
 }
 
-const pk = `f:\ws\AAA_1.3.0_XBOX_build20150126\resource\xsts.auth.bestv.com.pkcs8_der.key.pem`
+//you should put pem file in the same dir with jwt.exe. it can be created as below
+//openssl pkcs8 -inform DER -in xsts.auth.bestv.com.pkcs8_der.key  -outform PEM -out xsts.auth.bestv.com.pkcs8_der.key.pem
+const pk = `xsts.auth.bestv.com.pkcs8_der.key.pem`
 
+func create_xsts_token(uid string) (string, error) {
+
+}
 func main() {
-	enced, err := parse_jwe_joe(authorization)
-	if err != nil {
-		panic(err)
-	}
-	print_joe(enced)
 	private_key, err := load_pkcs8_pem(pk)
 	if err != nil {
 		panic(err)
 	}
+	joe, err := parse_jwe_joe(authorization)
+	if err != nil {
+		panic(err)
+	}
+	print_joe(joe)
 
-	cek, err := rsa_oaep_unwrap(enced.Key, private_key)
+	cek, err := rsa_oaep_unwrap(joe.Key, private_key)
 	if err != nil {
 		panic(err)
 	}
-	log.Println("cek:", cek, len(enced.Key))
-	aeskey := concat_kdf(cek)                                  // non-standard
-	plain, err := a128_cbc_hs256(enced.Text, aeskey, enced.Iv) //a128-cbc+hs256
+	log.Println("cek:", cek, len(joe.Key))
+	aeskey := concat_kdf(cek)                                      // non-standard
+	plain, err := a128_cbc_hs256_decrypt(joe.Text, aeskey, joe.Iv) //a128-cbc+hs256
 	if err != nil {
 		panic(err)
 	}
-	if enced.Header.Zip == "DEF" {
+	if joe.Header.Zip == "DEF" {
 		plain, err = inflate(plain)
 		log.Println(err, string(plain))
 	}
@@ -251,14 +270,14 @@ func main() {
 
 	//xsts_token
 	plain = patch_xsts_token(header, string(token), sig) //header.token.signature
-	if enced.Header.Zip == "DEF" {
+	if joe.Header.Zip == "DEF" {
 		plain = deflate(plain)
 	}
 
-	enced.Text, err = a128_cbc_hs256_encrypy(plain, aeskey, enced.Iv)
+	joe.Text, err = a128_cbc_hs256_encrypy(plain, aeskey, joe.Iv)
 	if err != nil {
 		panic(err)
 	}
-	reauth := to_string(enced)
-	log.Println(reauth)
+	joe.UserId = user_id
+	log.Println(joe.ToString())
 }

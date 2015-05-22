@@ -34,17 +34,15 @@ func x_ext_to_a128key(xext string) (key []byte, err error) { //`METHOD=AES-128,U
 			break
 		}
 	}
-	if len(uri) == 0 {
-		err = errors.New(`LIEK THIS METHOD=AES-128,URI="bestvdrm://hdnba1/20150516/",IV=0x4D5F8DAF68D0B88142222D0612A15243"`)
-		return
-	}
+
 	return bestvdrm_to_a128key(uri)
 }
 func bestvdrm_to_a128key(key_url string) (key []byte, err error) { //var key_url = "bestvdrm://hdnba1/20150522/"
 
 	var p = key_params(key_url)
 	if len(p) < 2 {
-		p = append(p, "")
+		err = errors.New(`LIEK THIS bestvdrm://hdnba1/20150516/`)
+		return
 	}
 	var source = fmt.Sprintf("Code=%v&&Date=%v&&DeviceInfo=BESTV&&Sdk=XBOXONE&&ValidTime=%v", p[0], p[1], time.Now().Unix())
 
@@ -93,6 +91,9 @@ func char_switch(data []byte) {
 }
 func key_params(s string) []string {
 	fields := strings.Split(s, "/")
+	if len(fields) <= 2 {
+		return []string{}
+	}
 	return fields[2:]
 }
 func aes_ecb_pkcs5padding(key, content []byte) (v []byte, err error) {
